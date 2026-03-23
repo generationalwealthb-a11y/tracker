@@ -395,7 +395,11 @@ select.form-control option{background:white;}
     <!-- FORGOT PASSWORD -->
     <div id="forgotForm" class="auth-form" style="display:none;">
       <div style="text-align:center;margin-bottom:20px;">
-        <div style="font-size:32px;margin-bottom:8px;">🔑</div>
+        <div style="margin-bottom:12px;display:flex;justify-content:center;">
+          <div style="width:52px;height:52px;border-radius:12px;background:var(--gold-bg);border:1px solid rgba(184,150,62,0.25);display:flex;align-items:center;justify-content:center;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--gold-dim)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
+        </div>
         <div style="font-size:14px;color:var(--text-secondary);">Enter your email and we'll send you a reset link.</div>
       </div>
       <label class="auth-label">Email Address</label>
@@ -948,14 +952,44 @@ async function initApp() {
       const profiles = JSON.parse(localStorage.getItem(SK_PROFILES) || '[]');
       currentUser = u;
       currentProfile = profiles.find(p => p.id === u.id) || { id: u.id, email: u.email, first_name: 'Advisor', last_name: '', role: 'advisor' };
-      await loadAllData(); setupUI(); document.getElementById('loadingScreen').style.display = 'none'; document.getElementById('authScreen').style.display = 'none'; document.getElementById('mainApp').classList.add('visible'); return;
+      await loadAllData();
+      setupUI();
+      document.getElementById('logDate').value = todayStr();
+      populateSelects();
+      renderAll();
+      document.getElementById('loadingScreen').style.display = 'none';
+      document.getElementById('authScreen').style.display = 'none';
+      document.getElementById('mainApp').classList.add('visible');
+      return;
     }
     document.getElementById('loadingScreen').style.display = 'none'; document.getElementById('authScreen').style.display = 'flex';
     document.getElementById('testModeWrap').style.display = 'block'; return;
   }
-  const { data: { session } } = await sb.auth.getSession();
-  if (session?.user) { currentUser = session.user; await loadProfile(session.user); await loadAllData(); setupUI(); document.getElementById('loadingScreen').style.display='none'; document.getElementById('authScreen').style.display='none'; document.getElementById('mainApp').classList.add('visible'); }
-  else { document.getElementById('loadingScreen').style.display='none'; document.getElementById('authScreen').style.display='flex'; }
+    const sessionResult = await Promise.race([
+    sb.auth.getSession(),
+    new Promise(resolve => setTimeout(() => resolve({ data: { session: null }, _timedOut: true }), 5000))
+  ]);
+  if (sessionResult._timedOut) {
+    document.getElementById('loadingScreen').style.display='none';
+    document.getElementById('authScreen').style.display='flex';
+    return;
+  }
+  const { data: { session } } = sessionResult;
+  if (session?.user) {
+    currentUser = session.user;
+    await loadProfile(session.user);
+    await loadAllData();
+    setupUI();
+    document.getElementById('logDate').value = todayStr();
+    populateSelects();
+    renderAll();
+    document.getElementById('loadingScreen').style.display='none';
+    document.getElementById('authScreen').style.display='none';
+    document.getElementById('mainApp').classList.add('visible');
+  } else {
+    document.getElementById('loadingScreen').style.display='none';
+    document.getElementById('authScreen').style.display='flex';
+  }
 }
 
 async function onAuthSuccess() {
@@ -1134,7 +1168,7 @@ async function logActivity() {
     type, date: dateVal, logged_date: dateVal,
     notes: document.getElementById('logNotes').value.trim(),
     lead_source: document.getElementById('logLeadSource').value,
-    time: new Date().toLocaleTimeString('en-BW',{hour:'2-digit',minute:'2-digit'}),
+    time: new Date().toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit',hour12:false}),
     created_at: new Date().toISOString()
   };
   if (type === 'policy') {
@@ -1211,7 +1245,20 @@ async function saveClient() {
     created_at: existingId ? (allClients.find(x=>x.id===existingId)?.created_at||new Date().toISOString()) : new Date().toISOString(),
     updated_at: new Date().toISOString()
   };
-  await saveClientDB(c); closeClientModal(); renderPipeline(); toast('Client saved', 'success');
+  const saveBtn = document.querySelector('#clientModal .btn-primary');
+  if (saveBtn) { saveBtn.innerHTML = '<span class="spinner"></span> Saving…'; saveBtn.disabled = true; }
+  try {
+    await saveClientDB(c);
+    closeClientModal();
+    renderPipeline();
+    renderAll();
+    toast('Client saved', 'success');
+  } catch (err) {
+    console.error('saveClient error:', err);
+    toast('Failed to save client: ' + (err.message || 'Unknown error'), 'error');
+  } finally {
+    if (saveBtn) { saveBtn.innerHTML = 'Save Client'; saveBtn.disabled = false; }
+  }
 }
 
 async function deleteClient() {
@@ -1784,7 +1831,20 @@ function showView(name, el) {
   if (name==='manager') renderManager();
 }
 
-function renderAll() { renderDaily(); }
+function renderAll() {
+  renderDaily();
+  // Keep all cached views fresh so switching tabs shows current data
+  const active = document.querySelector('.view.active');
+  if (active) {
+    const id = active.id;
+    if (id === 'view-pipeline')  renderPipeline();
+    if (id === 'view-weekly')    renderWeekly();
+    if (id === 'view-monthly')   renderMonthly();
+    if (id === 'view-yearly')    renderYearly();
+    if (id === 'view-targets')   renderTargets();
+    if (id === 'view-manager' && currentProfile?.role === 'manager') renderManager();
+  }
+}
 
 // BOOT
 initApp();
